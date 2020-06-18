@@ -10,7 +10,48 @@
 #include <random>
 #include <algorithm>
 
-// This function will calculate initial random sequence with given parameters
+template <typename Iterator>
+void robust_random_shuffle(Iterator begin, Iterator end, int seed) {
+    std::minstd_rand engine(seed);
+
+    std::vector<uint32_t> indices(end - begin);
+    for (size_t i = 0; i < indices.size(); ++i) {
+        indices[i] = i;
+    }
+
+    // Generate acceptable permutation
+    bool acceptable = false;
+    while (!acceptable) {
+        int count = 0;
+        std::random_shuffle(indices.begin(), indices.end(), [&](int max) {
+            return engine() % max;        
+        });
+    
+        for (size_t i = 0; i < indices.size(); ++i) {
+            if (indices[i] != i) {
+                ++count;   
+            }
+        }
+
+        if (count > 12) {
+            acceptable = true;
+        }
+    }
+
+    // Apply permutation
+    for (int i = 0; i < end - begin; ++i) {
+        size_t curr = i;
+        size_t next = indices[i];
+        while (next != i) {
+            std::swap(begin[curr], begin[next]);
+            indices[curr] = curr;
+            curr = next;
+            next = indices[next];
+        }
+        indices[curr] = curr;
+    }
+}
+
 double init_seq_generator(double mu, double x0, int it, int seed, std::vector<uint8_t> &bits) {
     // Initial logistic chaos map iteration
     double xn = x0;
@@ -63,10 +104,7 @@ double normal_seq_generator(double state, int seed) {
     }
 
     // Shuffle digits
-    std::minstd_rand engine(seed);
-    std::random_shuffle(digits.begin(), digits.end(), [&](int max) {
-        return engine() % max;
-    });
+    robust_random_shuffle(digits.begin(), digits.end(), seed);
 
     // Form new mu, x and I for next generation
     int I = 0;
@@ -110,15 +148,24 @@ double normal_seq_generator(double state, int seed) {
     return x;
 }
 
-int main() {
+int main(int argc, char **argv) {
+    std::cout << "Start initial sequence generaton" << std::endl;
+
     std::vector<uint8_t> bits;
     double y1 = init_seq_generator(3.8, 0.3, 1024, 42, bits);
 
-    double y = y1;
-    for (int i = 0; i < 100; ++i) {
-        std::cout << y << std::endl;
-        y = normal_seq_generator(y, 42);
+    std::cout << "Initial sequence generation completed" << std::endl;
+
+    // Generate 1MB random numbers
+    std::vector<double> data(1024 * 1024 * 1024 / sizeof(double));
+    data[0] = y1;
+    for (size_t i = 1; i < data.size(); ++i) {
+        data[i] = normal_seq_generator(data[i - 1], i);
     }
+
+    std::ofstream ofs("output.bin", std::ios::out | std::ios::binary);
+    ofs.write(reinterpret_cast<char *>(data.data()), data.size() * sizeof(double));
+    ofs.close();
 
     return 0;
 }
