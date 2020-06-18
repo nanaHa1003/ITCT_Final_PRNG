@@ -10,6 +10,14 @@
 #include <random>
 #include <algorithm>
 
+template <typename Container>
+void extract_decimal_digits(double x, Container &digits) {
+    for (int i = 0; i < 15; ++i) {
+        x = std::fmod(x * 10.0, 10.0);
+        digits[i] = int(x);
+    }
+}
+
 template <typename Iterator>
 void robust_random_shuffle(Iterator begin, Iterator end, int seed) {
     std::minstd_rand engine(seed);
@@ -61,11 +69,7 @@ double init_seq_generator(double mu, double x0, int it, int seed, std::vector<ui
 
     // Extract digits
     std::array<uint8_t, 15> digits;
-    std::stringstream ss;
-    ss << std::fixed << std::setprecision(15) << xn;
-    for (int i = 0; i < 15; ++i) {
-        digits[i] = ss.str()[i + 2] - '0';
-    }
+    extract_decimal_digits(xn, digits);
 
     // Prepare minimal PRNG (LCG) for choosing digits
     std::minstd_rand engine(seed);
@@ -96,12 +100,8 @@ double init_seq_generator(double mu, double x0, int it, int seed, std::vector<ui
 
 double normal_seq_generator(double state, int seed) {
     // Extract decimal digits from previous generated y (state)
-    std::stringstream ss;
-    ss << std::fixed << std::setprecision(15) << state;
     std::array<uint8_t, 15> digits;
-    for (int i = 0; i < 15; ++i) {
-        digits[i] = ss.str()[i + 2] - '0';
-    }
+    extract_decimal_digits(state, digits);
 
     // Shuffle digits
     robust_random_shuffle(digits.begin(), digits.end(), seed);
@@ -110,10 +110,7 @@ double normal_seq_generator(double state, int seed) {
     int I = 0;
     double mu, x;
 
-    I = I + digits[2];
-    I = (I << 3) + (I << 1) + digits[6];
-    I = (I << 3) + (I << 1) + digits[10];
-    I = (I << 3) + (I << 1) + digits[14];
+    I = digits[2] * 1000 + digits[6] * 100 + digits[10] * 10 + digits[14];
 
     std::string mu_s(4, '0');
     mu_s[0] = digits[1] + '0';
@@ -136,9 +133,7 @@ double normal_seq_generator(double state, int seed) {
         mu = std::fmod(mu, 4.0) + 3.5699;
     }
 
-    if (I < 1000) {
-        I += 1000;
-    }
+    I = (I < 1000) ?(I + 1000) :I;
 
     // Generate next random number with logistic chaotic system
     for (int i = 0; i < I; ++i) {
@@ -156,16 +151,26 @@ int main(int argc, char **argv) {
 
     std::cout << "Initial sequence generation completed" << std::endl;
 
-    // Generate 1MB random numbers
-    std::vector<double> data(1024 * 1024 * 1024 / sizeof(double));
+    std::vector<double> data(30000);
     data[0] = y1;
     for (size_t i = 1; i < data.size(); ++i) {
         data[i] = normal_seq_generator(data[i - 1], i);
     }
 
-    std::ofstream ofs("output.bin", std::ios::out | std::ios::binary);
-    ofs.write(reinterpret_cast<char *>(data.data()), data.size() * sizeof(double));
-    ofs.close();
+    std::ofstream hist("hist.txt");
+    hist << std::fixed << std::setprecision(15);
+    for (size_t i = 0; i < data.size(); ++i) {
+        hist << data[i] << "\n";
+    }
+    hist.close();
+
+    std::ofstream bin("seq.bin", std::ios::out | std::ios::binary);
+    for (size_t i = 0; i < data.size(); ++i) {
+        // Take last 48 bits from double
+        char *tmp = reinterpret_cast<char *>(&data[i]) + 2;
+        bin.write(tmp, 6);
+    }
+    bin.close();
 
     return 0;
 }
