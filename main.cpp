@@ -1,12 +1,10 @@
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <fstream>
-#include <sstream>
-#include <string>
 #include <iomanip>
 #include <vector>
 #include <array>
-#include <cstdint>
 #include <random>
 #include <algorithm>
 
@@ -110,22 +108,9 @@ double normal_seq_generator(double state, int seed) {
     int I = 0;
     double mu, x;
 
-    I = digits[2] * 1000 + digits[6] * 100 + digits[10] * 10 + digits[14];
-
-    std::string mu_s(4, '0');
-    mu_s[0] = digits[1] + '0';
-    mu_s[1] = digits[5] + '0';
-    mu_s[2] = digits[9] + '0';
-    mu_s[3] = digits[13] + '0';
-    mu = static_cast<double>(std::stoi(mu_s));
-
-    std::string x_s(6, '0');
-    x_s[1] = '.';
-    x_s[2] = '0' + digits[0];
-    x_s[3] = '0' + digits[4];
-    x_s[4] = '0' + digits[8];
-    x_s[5] = '0' + digits[12];
-    x = std::stod(x_s);
+    I  = digits[2] * 1000 + digits[6] * 100 + digits[10] * 10 + digits[14];
+    mu = digits[1] * 1000 + digits[5] * 100 + digits[9] * 10 + digits[13];
+    x  = digits[0] * 0.1 + digits[4] * 0.01 + digits[8] * 0.001 + digits[12] * 0.0001;
 
     // Refine generated parameters to meet to chaotic condiction
     mu += 3.5699;
@@ -143,15 +128,53 @@ double normal_seq_generator(double state, int seed) {
     return x;
 }
 
+template <typename Container1, typename Container2>
+void from_double_to_bytes(Container1 &nums, Container2 &bytes, int seed) {
+    std::array<uint8_t, 15> digits;
+    std::minstd_rand engine(seed);
+    std::array<uint8_t, 15> index{{ 0,  1,  2,  3 , 4,
+                                    5,  6,  7,  8,  9,
+                                   10, 11, 12, 13, 14 }};
+
+    bytes.resize(nums.size() * 13);
+    for (size_t i = 0; i < nums.size(); ++i) {
+        // Extract digits
+        extract_decimal_digits(nums[i], digits);
+
+        // Construct bit sequences
+        for (int j = 0; j < 13; ++j) {
+            // Generate new order of indices
+            std::random_shuffle(index.begin(), index.end(), [&](int max) {
+                return engine() % max;
+            });
+
+            // Convert selected digits to number and mod by 256
+            uint64_t y = 0;
+            for (int k = 0; k < j + 3; ++k) {
+                y = (y << 3) + (y << 1) + digits[index[k]];
+            }
+
+            // Save results
+            bytes[j + 13 * i] = static_cast<uint8_t>(y % 256ULL);
+        }
+    }
+}
+
 int main(int argc, char **argv) {
     std::cout << "Start initial sequence generaton" << std::endl;
 
-    std::vector<uint8_t> bits;
-    double y1 = init_seq_generator(3.8, 0.3, 1024, 42, bits);
+    std::vector<uint8_t> bytes;
+    double y1 = init_seq_generator(3.6779, 0.6942, 8459, 42, bytes);
 
     std::cout << "Initial sequence generation completed" << std::endl;
+    for (auto num : bytes) {
+        for (int i = 7; i >= 0; --i) {
+            std::cout << ((num & (1 << i)) >> i);
+        }
+    }
+    std::cout << std::endl;
 
-    std::vector<double> data(30000);
+    std::vector<double> data(20000);
     data[0] = y1;
     for (size_t i = 1; i < data.size(); ++i) {
         data[i] = normal_seq_generator(data[i - 1], i);
@@ -164,12 +187,9 @@ int main(int argc, char **argv) {
     }
     hist.close();
 
+    from_double_to_bytes(data, bytes, 4096);
     std::ofstream bin("seq.bin", std::ios::out | std::ios::binary);
-    for (size_t i = 0; i < data.size(); ++i) {
-        // Take last 48 bits from double
-        char *tmp = reinterpret_cast<char *>(&data[i]) + 2;
-        bin.write(tmp, 6);
-    }
+    bin.write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
     bin.close();
 
     return 0;
